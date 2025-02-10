@@ -11,6 +11,10 @@ layout (binding = 0) readonly buffer X {A_TYPE data_a[];};
 layout (binding = 1) readonly buffer Y {B_TYPE data_b[];};
 layout (binding = 2) buffer D {D_TYPE data_d[];};
 
+layout (constant_id = 0) const uint BLOCK_SIZE = 32;
+
+shared uint tmp[BLOCK_SIZE];
+
 const uint CHUNK_SIZE = 512;
 
 void main() {
@@ -26,6 +30,18 @@ void main() {
         }
         count += uint(data_a[idx] == data_b[idx]);
     }
+    tmp[col] = count;
 
-    atomicAdd(data_d[0], D_TYPE(count));
+    // Reduce across warp
+    barrier();
+    [[unroll]] for (int s = int(BLOCK_SIZE) / 2; s > 0; s >>= 1) {
+        if (col < s) {
+            tmp[col] += tmp[col + s];
+        }
+        barrier();
+    }
+
+    if (col == 0) {
+        atomicAdd(data_d[0], D_TYPE(tmp[0]));
+    }
 }
